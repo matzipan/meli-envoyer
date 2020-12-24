@@ -872,7 +872,7 @@ struct NotmuchOp {
 }
 
 impl BackendOp for NotmuchOp {
-    fn as_bytes(&mut self) -> ResultFuture<Vec<u8>> {
+    fn as_bytes(&self) -> ResultFuture<Vec<u8>> {
         let index_lck = self.index.write().unwrap();
         let message = Message::find_message(&self.database, &index_lck[&self.hash])?;
         let mut f = std::fs::File::open(message.get_filename())?;

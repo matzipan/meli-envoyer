@@ -91,7 +91,7 @@ impl MaildirOp {
 }
 
 impl<'a> BackendOp for MaildirOp {
-    fn as_bytes(&mut self) -> ResultFuture<Vec<u8>> {
+    fn as_bytes(&self) -> ResultFuture<Vec<u8>> {
         if self.slice.is_none() {
             let file = std::fs::OpenOptions::new()
                 .read(true)

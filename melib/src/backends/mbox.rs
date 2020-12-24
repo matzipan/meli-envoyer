@@ -191,7 +191,7 @@ impl MboxOp {
 }
 
 impl BackendOp for MboxOp {
-    fn as_bytes(&mut self) -> ResultFuture<Vec<u8>> {
+    fn as_bytes(&self) -> ResultFuture<Vec<u8>> {
         if self.slice.get_mut().is_none() {
             let file = std::fs::OpenOptions::new()
                 .read(true)
