@@ -1250,13 +1250,26 @@ impl ImapType {
         let server_hostname = get_conf_val!(s["server_hostname"])?;
         let server_username = get_conf_val!(s["server_username"])?;
         let use_oauth2: bool = get_conf_val!(s["use_oauth2"], false)?;
-        let server_password = if !s.extra.contains_key("server_password_command") {
-            if use_oauth2 {
+
+        if use_oauth2 {
+            if !s.extra.contains_key("server_password_command")
+                && !s.extra.contains_key("server_password")
+            {
                 return Err(MeliError::new(format!(
-                    "({}) `use_oauth2` use requires `server_password_command` set with a command that returns an OAUTH2 token. Consult documentation for guidance.",
+                    "({}) `use_oauth2` use requires either `server_password` set or `server_password_command` set with a command that returns an OAUTH2 token. Consult documentation for guidance.",
+                    s.name,
+                )));
+            } else if s.extra.contains_key("server_password_command")
+                && s.extra.contains_key("server_password")
+            {
+                return Err(MeliError::new(format!(
+                    "Configuration error ({}): both server_password and server_password_command are set, cannot choose",
                     s.name,
                 )));
             }
+        }
+
+        let server_password = if !s.extra.contains_key("server_password_command") {
             get_conf_val!(s["server_password"])?.to_string()
         } else {
             let invocation = get_conf_val!(s["server_password_command"])?;
@@ -1503,20 +1516,26 @@ impl ImapType {
         get_conf_val!(s["server_hostname"])?;
         get_conf_val!(s["server_username"])?;
         let use_oauth2: bool = get_conf_val!(s["use_oauth2"], false)?;
-        if !s.extra.contains_key("server_password_command") {
-            if use_oauth2 {
+        if use_oauth2 {
+            if !s.extra.contains_key("server_password_command")
+                && !s.extra.contains_key("server_password")
+            {
                 return Err(MeliError::new(format!(
-                    "({}) `use_oauth2` use requires `server_password_command` set with a command that returns an OAUTH2 token. Consult documentation for guidance.",
+                    "({}) `use_oauth2` use requires either `server_password` set or `server_password_command` set with a command that returns an OAUTH2 token. Consult documentation for guidance.",
+                    s.name,
+                )));
+            } else if s.extra.contains_key("server_password_command")
+                && s.extra.contains_key("server_password")
+            {
+                return Err(MeliError::new(format!(
+                    "Configuration error ({}): both server_password and server_password_command are set, cannot choose",
                     s.name,
                 )));
             }
+        } else {
             get_conf_val!(s["server_password"])?;
-        } else if s.extra.contains_key("server_password") {
-            return Err(MeliError::new(format!(
-                "Configuration error ({}): both server_password and server_password_command are set, cannot choose",
-                s.name.as_str(),
-            )));
         }
+
         let server_port = get_conf_val!(s["server_port"], 143)?;
         let use_tls = get_conf_val!(s["use_tls"], true)?;
         let use_starttls = get_conf_val!(s["use_starttls"], !(server_port == 993))?;
