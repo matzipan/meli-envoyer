@@ -33,7 +33,7 @@ pub use connection::*;
 mod watch;
 pub use watch::*;
 mod cache;
-use cache::ModSequence;
+pub use cache::ModSequence;
 pub mod managesieve;
 mod untagged;
 
