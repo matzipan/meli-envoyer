@@ -565,7 +565,7 @@ impl Attachment {
                     for a in parts {
                         if a.content_disposition.kind.is_inline() {
                             if let ContentType::Text {
-                                kind: Text::Plain, ..
+                                kind: Text::Html, ..
                             } = a.content_type
                             {
                                 a.get_text_recursive(text);
