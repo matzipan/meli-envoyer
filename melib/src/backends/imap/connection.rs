@@ -20,7 +20,7 @@
  */
 
 use super::protocol_parser::{ImapLineSplit, ImapResponse, RequiredResponses, SelectResponse};
-use crate::backends::{MailboxHash, RefreshEvent};
+use crate::backends::{AccountHash, BackendEventConsumer, MailboxHash, RefreshEvent};
 use crate::connections::{lookup_ipv4, timeout, Connection};
 use crate::email::parser::BytesExt;
 use crate::error::*;
@@ -33,7 +33,7 @@ use std::convert::TryFrom;
 use std::future::Future;
 use std::iter::FromIterator;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use data_encoding::BASE64;
@@ -112,6 +112,12 @@ pub struct ImapConnection {
     pub server_conf: ImapServerConf,
     pub sync_policy: SyncPolicy,
     pub uid_store: Arc<UIDStore>,
+
+    pub account_hash: AccountHash,
+    pub account_name: Arc<String>,
+    pub capabilities: Arc<Mutex<Capabilities>>,
+    pub is_online: Arc<Mutex<(SystemTime, Result<()>)>>,
+    pub event_consumer: BackendEventConsumer,
 }
 
 impl ImapStream {
@@ -587,12 +593,20 @@ impl ImapConnection {
                 SyncPolicy::None
             },
             uid_store,
+            account_hash: 0,
+            account_name: Arc::new("".to_string()),
+            capabilities: Default::default(),
+            is_online: Arc::new(Mutex::new((
+                SystemTime::now(),
+                Err(MeliError::new("Account is uninitialised.")),
+            ))),
+            event_consumer: BackendEventConsumer::new(Arc::new(|_, _| {})),
         }
     }
 
     pub fn connect<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
-            if let (time, ref mut status @ Ok(())) = *self.uid_store.is_online.lock().unwrap() {
+            if let (time, ref mut status @ Ok(())) = *self.is_online.lock().unwrap() {
                 if SystemTime::now().duration_since(time).unwrap_or_default() >= IMAP_PROTOCOL_TIMEOUT {
                     let err = MeliError::new("Connection timed out").set_kind(ErrorKind::Timeout);
                     *status = Err(err.clone());
@@ -619,9 +633,9 @@ impl ImapConnection {
             }
             let new_stream = ImapStream::new_connection(&self.server_conf).await;
             if let Err(err) = new_stream.as_ref() {
-                self.uid_store.is_online.lock().unwrap().1 = Err(err.clone());
+                self.is_online.lock().unwrap().1 = Err(err.clone());
             } else {
-                *self.uid_store.is_online.lock().unwrap() = (SystemTime::now(), Ok(()));
+                *self.is_online.lock().unwrap() = (SystemTime::now(), Ok(()));
             }
             let (capabilities, stream) = new_stream?;
             self.stream = Ok(stream);
@@ -693,7 +707,7 @@ impl ImapConnection {
                 }
                 ImapProtocol::ManageSieve => {}
             }
-            *self.uid_store.capabilities.lock().unwrap() = capabilities;
+            *self.capabilities.lock().unwrap() = capabilities;
             Ok(())
         })
     }
@@ -707,7 +721,7 @@ impl ImapConnection {
             let mut response = Vec::new();
             ret.clear();
             self.stream.as_mut()?.read_response(&mut response).await?;
-            *self.uid_store.is_online.lock().unwrap() = (SystemTime::now(), Ok(()));
+            *self.is_online.lock().unwrap() = (SystemTime::now(), Ok(()));
 
             match self.server_conf.protocol {
                 ImapProtocol::IMAP { .. } => {
@@ -736,8 +750,8 @@ impl ImapConnection {
                                 response_code,
                                 String::from_utf8_lossy(&response)
                             );
-                            (self.uid_store.event_consumer)(
-                                self.uid_store.account_hash,
+                            (self.event_consumer)(
+                                self.account_hash,
                                 crate::backends::BackendEvent::Notice {
                                     description: None,
                                     content: response_code.to_string(),
@@ -753,8 +767,8 @@ impl ImapConnection {
                                 response_code,
                                 String::from_utf8_lossy(&response)
                             );
-                            (self.uid_store.event_consumer)(
-                                self.uid_store.account_hash,
+                            (self.event_consumer)(
+                                self.account_hash,
                                 crate::backends::BackendEvent::Notice {
                                     description: None,
                                     content: response_code.to_string(),
@@ -816,7 +830,7 @@ impl ImapConnection {
             }
             Err(err)
         } else {
-            *self.uid_store.is_online.lock().unwrap() = (SystemTime::now(), Ok(()));
+            *self.is_online.lock().unwrap() = (SystemTime::now(), Ok(()));
             Ok(())
         }
     }
@@ -870,8 +884,7 @@ impl ImapConnection {
                 MailboxSelection::Select(_) => {
                     let mut response = Vec::with_capacity(8 * 1024);
                     if self
-                        .uid_store
-                            .capabilities
+                        .capabilities
                             .lock()
                             .unwrap()
                             .iter()
@@ -886,12 +899,7 @@ impl ImapConnection {
                              * reselecting the same mailbox with EXAMINE command)[..]
                              */
                             let mut nonexistent = "blurdybloop".to_string();
-                            {
-                                let mailboxes = self.uid_store.mailboxes.lock().await;
-                                while mailboxes.values().any(|m| m.imap_path() == nonexistent) {
-                                    nonexistent.push('p');
-                                }
-                            }
+
                             self.send_command(
                                 format!(
                                     "SELECT \"{}\"",
@@ -910,8 +918,8 @@ impl ImapConnection {
     }
 
     pub fn add_refresh_event(&mut self, ev: RefreshEvent) {
-        (self.uid_store.event_consumer)(
-            self.uid_store.account_hash,
+        (self.event_consumer)(
+            self.account_hash,
             crate::backends::BackendEvent::Refresh(ev),
         );
     }
