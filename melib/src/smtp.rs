@@ -771,6 +771,12 @@ impl SmtpConnection {
         }
         Ok(())
     }
+
+    pub async fn quit(&mut self) -> Result<()> {
+        self.send_command(&[b"QUIT"]).await?;
+
+        Ok(())
+    }
 }
 
 /// Expected reply code in a single or multi-line reply by the server
