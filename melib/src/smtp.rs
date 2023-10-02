@@ -727,13 +727,6 @@ impl SmtpConnection {
                 .chain_err_kind(crate::error::ErrorKind::Network)?;
         }
 
-        if !mail.ends_with('\n') {
-            self.stream
-                .write_all(b".\r\n")
-                .await
-                .chain_err_kind(crate::error::ErrorKind::Network)?;
-        }
-
         //The mail data are terminated by a line containing only a period, that is, the character
         //sequence "<CRLF>.<CRLF>", where the first <CRLF> is actually the terminator of the
         //previous line (see Section 4.5.2). This is the end of mail data indication.
